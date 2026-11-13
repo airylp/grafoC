@@ -1,0 +1,15 @@
+[Unit]
+Description=grafo-publicador: publicar y descargar los ejecutables de grafo (solo Tailscale)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/proyectos/grafo/publicador/target/release/grafo-publicador
+Environment=GRAFO_ESCUCHA=100.102.32.30:8097
+Environment=GRAFO_FUENTE=%h/proyectos/grafo
+# Si Tailscale aún no tiene IP al arrancar, reintenta.
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

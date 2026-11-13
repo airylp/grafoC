@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grafo · publicador</title>
+<style>
+  :root {
+    --fondo: #f6f7fb; --panel: #ffffff; --texto: #1c2030; --suave: #667089;
+    --borde: #dfe3ec; --acento: #2f6fed; --acento-texto: #fff; --codigo: #eef1f7;
+    --ok: #198754; --mal: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #0c0e16; --panel: #151926; --texto: #e4e7f0; --suave: #8b93aa;
+      --borde: #262c3d; --acento: #6c9cff; --acento-texto: #0c0e16; --codigo: #1d2233;
+      --ok: #4cc38a; --mal: #ff6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 28px 16px 60px; }
+  h1 { font-size: 26px; margin: 0 0 4px; display: flex; align-items: center; gap: 10px; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  .sub { color: var(--suave); margin: 0 0 24px; }
+  section { background: var(--panel); border: 1px solid var(--borde); border-radius: 12px;
+            padding: 18px; margin-bottom: 16px; }
+  .cmd { display: flex; gap: 8px; align-items: stretch; margin: 8px 0; }
+  .cmd code { flex: 1; min-width: 0; background: var(--codigo); border-radius: 8px; padding: 10px 12px;
+              font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto; white-space: nowrap; }
+  button, .boton { background: var(--acento); color: var(--acento-texto); border: 0; border-radius: 8px;
+           padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none;
+           display: inline-block; white-space: nowrap; }
+  button.sec { background: transparent; color: var(--texto); border: 1px solid var(--borde); font-weight: 500; }
+  button.peligro { background: transparent; color: var(--mal); border: 1px solid var(--borde); padding: 4px 10px; font-weight: 500; }
+  .nota { color: var(--suave); font-size: 13px; margin: 6px 0 0; }
+  .ultimas { display: flex; flex-wrap: wrap; gap: 10px; }
+  .ultima { border: 1px solid var(--borde); border-radius: 10px; padding: 12px; flex: 1 1 240px; }
+  .ultima b { display: block; }
+  .ultima small { color: var(--suave); display: block; margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+  th { color: var(--suave); font-weight: 500; }
+  td.num { white-space: nowrap; }
+  .hash { font: 11px ui-monospace, Menlo, monospace; color: var(--suave); }
+  .tabla { overflow-x: auto; }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--suave); }
+  form .ancho { grid-column: 1 / -1; }
+  input, select { font: inherit; color: var(--texto); background: var(--fondo); border: 1px solid var(--borde);
+                  border-radius: 8px; padding: 8px; min-width: 0; }
+  progress { width: 100%; }
+  #estado.ok { color: var(--ok); } #estado.mal { color: var(--mal); }
+  details summary { cursor: pointer; font-weight: 600; }
+  @media (max-width: 600px) { form { grid-template-columns: 1fr; } .cmd { flex-direction: column; } }
+</style>
+</head>
+<body>
+<main>
+  <h1><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3.2"/><circle cx="4.5" cy="6" r="2"/><circle cx="19.5" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><circle cx="5" cy="18" r="2"/><path d="M9.5 10 6.2 7.3M14.6 10.3l3.4-3.8M14.3 14.3l2.4 3M9.6 14.2 6.5 16.7"/></g></svg>Grafo de Claude</h1>
+  <p class="sub">Versiones del visor 3D de carpetas, proyectos, sesiones, archivos y pendientes de Claude.</p>
+
+  <section>
+    <h2>Descargar, compilar y abrir</h2>
+    <p class="nota" style="margin-top:0">En la Terminal de tu Mac. Instala Rust si falta, compila en tu Mac, instala <b>grafo.app</b> en Aplicaciones y la abre. También funciona en Linux.</p>
+    <div class="cmd"><code id="c-instalar"></code><button class="sec" data-copiar="c-instalar">Copiar</button></div>
+    <p class="nota">Para además publicarla aquí, agrega tu token: <code id="c-publicar"></code></p>
+    <p class="nota">Desinstalar: <code id="c-desinstalar"></code></p>
+  </section>
+
+  <section>
+    <h2>Instalar la última versión ya compilada</h2>
+    <p class="nota" style="margin-top:0">Sin compilar: baja la última <b>grafo.app</b> publicada, comprueba su SHA-256 y la instala.</p>
+    <div class="cmd"><code id="c-descargar"></code><button class="sec" data-copiar="c-descargar">Copiar</button></div>
+    <div class="ultimas" id="ultimas" style="margin-top:12px"></div>
+    <p class="nota">Si la descargas con el navegador, macOS la bloquea por venir de internet. Ábrela con clic derecho → Abrir, o ejecuta <code>xattr -dr com.apple.quarantine grafo.app</code>.</p>
+  </section>
+
+  <section>
+    <h2>Versiones publicadas</h2>
+    <div class="tabla"><table>
+      <thead><tr><th>Fecha</th><th>Plataforma</th><th>Versión</th><th>Tamaño</th><th>Nota</th><th></th></tr></thead>
+      <tbody id="versiones"><tr><td colspan="6" class="nota">Cargando…</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <details>
+      <summary>Publicar un archivo a mano</summary>
+      <form id="form" style="margin-top:14px">
+        <label class="ancho">Archivo (.zip con grafo.app, o .tar.gz con el ejecutable)
+          <input type="file" id="archivo" required></label>
+        <label>Plataforma
+          <select id="plataforma">
+            <option value="macos-arm64">macOS Apple Silicon (arm64)</option>
+            <option value="macos-x86_64">macOS Intel (x86_64)</option>
+            <option value="linux-x86_64">Linux x86_64</option>
+          </select></label>
+        <label>Versión <input id="version" placeholder="0.1.0"></label>
+        <label class="ancho">Nota <input id="nota" placeholder="Qué cambió"></label>
+        <label class="ancho">Token (en el servidor: ~/.local/share/grafo-publicador/token)
+          <input id="token" type="password" autocomplete="off" required></label>
+        <div class="ancho"><button type="submit">Publicar</button></div>
+        <progress id="progreso" class="ancho" value="0" max="1" hidden></progress>
+        <p id="estado" class="ancho nota"></p>
+      </form>
+    </details>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const origen = location.origin;
+$('c-instalar').textContent = `curl -fsSL ${origen}/instalar.sh | sh`;
+$('c-publicar').textContent = `curl -fsSL ${origen}/instalar.sh | GRAFO_TOKEN=… sh`;
+$('c-desinstalar').textContent = `curl -fsSL ${origen}/instalar.sh | sh -s -- desinstalar`;
+$('c-descargar').textContent = `curl -fsSL ${origen}/descargar.sh | sh`;
+
+document.querySelectorAll('[data-copiar]').forEach(b => b.addEventListener('click', async () => {
+  const t = $(b.dataset.copiar).textContent;
+  try { await navigator.clipboard.writeText(t); }
+  catch { const r = document.createRange(); r.selectNode($(b.dataset.copiar)); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand('copy'); }
+  b.textContent = 'Copiado'; setTimeout(() => b.textContent = 'Copiar', 1500);
+}));
+
+const guardado = (() => { try { return localStorage.getItem('grafo-token') || ''; } catch { return ''; } })();
+$('token').value = guardado;
+
+const NOMBRES = { 'macos-arm64': 'macOS Apple Silicon', 'macos-x86_64': 'macOS Intel', 'linux-x86_64': 'Linux x86_64' };
+const tam = b => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB';
+const fecha = s => new Date(s * 1000).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function cargar() {
+  let vs = [];
+  try { vs = await (await fetch('/api/versiones')).json(); } catch { }
+  const ultimas = {};
+  vs.forEach(v => { if (!ultimas[v.plataforma]) ultimas[v.plataforma] = v; });
+  $('ultimas').innerHTML = Object.values(ultimas).map(v => `
+    <div class="ultima"><b>${esc(NOMBRES[v.plataforma] || v.plataforma)}</b>
+      <small>${esc(v.version || 's/v')} · ${fecha(v.fecha)} · ${tam(v.bytes)}</small>
+      <a class="boton" href="/descargar/${encodeURIComponent(v.id)}">Descargar</a></div>`).join('')
+    || '<p class="nota">Todavía no hay versiones publicadas.</p>';
+  $('versiones').innerHTML = vs.map(v => `
+    <tr><td class="num">${fecha(v.fecha)}</td><td>${esc(NOMBRES[v.plataforma] || v.plataforma)}</td>
+      <td>${esc(v.version)}</td><td class="num">${tam(v.bytes)}</td>
+      <td>${esc(v.nota)}<div class="hash" title="SHA-256">${esc(v.sha256.slice(0, 16))}…</div></td>
+      <td class="num"><a href="/descargar/${encodeURIComponent(v.id)}">Descargar</a>
+        <button class="peligro" data-borrar="${esc(v.id)}">Borrar</button></td></tr>`).join('')
+    || '<tr><td colspan="6" class="nota">Sin versiones.</td></tr>';
+  document.querySelectorAll('[data-borrar]').forEach(b => b.addEventListener('click', () => borrar(b.dataset.borrar)));
+}
+
+async function borrar(id) {
+  const token = $('token').value || prompt('Token para borrar:');
+  if (!token || !confirm('¿Borrar esta versión?')) return;
+  const r = await fetch('/versiones/' + encodeURIComponent(id), { method: 'DELETE', headers: { 'x-token': token } });
+  if (!r.ok) alert('No se pudo borrar: ' + await r.text());
+  cargar();
+}
+
+$('form').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = $('archivo').files[0];
+  if (!f) return;
+  const nombre = f.name.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '');
+  const q = new URLSearchParams({ plataforma: $('plataforma').value, archivo: nombre, version: $('version').value, nota: $('nota').value });
+  const x = new XMLHttpRequest();
+  x.open('POST', '/publicar?' + q);
+  x.setRequestHeader('x-token', $('token').value);
+  x.setRequestHeader('Content-Type', 'application/octet-stream');
+  $('progreso').hidden = false; $('estado').className = 'ancho nota'; $('estado').textContent = 'Subiendo…';
+  x.upload.onprogress = ev => { if (ev.lengthComputable) $('progreso').value = ev.loaded / ev.total; };
+  x.onload = () => {
+    $('progreso').hidden = true;
+    if (x.status === 201) {
+      try { localStorage.setItem('grafo-token', $('token').value); } catch { }
+      $('estado').className = 'ancho nota ok'; $('estado').textContent = 'Publicada.';
+      $('form').reset(); $('token').value = (() => { try { return localStorage.getItem('grafo-token') || ''; } catch { return ''; } })();
+      cargar();
+    } else { $('estado').className = 'ancho nota mal'; $('estado').textContent = 'Error: ' + x.responseText; }
+  };
+  x.onerror = () => { $('progreso').hidden = true; $('estado').className = 'ancho nota mal'; $('estado').textContent = 'Error de red.'; };
+  x.send(f);
+});
+
+cargar();
+</script>
+</body>
+</html>

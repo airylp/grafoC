@@ -1,0 +1,18 @@
+[package]
+name = "grafo"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Visor 3D de carpetas, proyectos, sesiones, archivos y pendientes de Claude Code"
+
+[dependencies]
+eframe = "0.37"
+serde_json = "1"
+chrono = "0.4"
+
+[profile.release]
+opt-level = 3
+strip = true
+
+[profile.dev]
+opt-level = 1
