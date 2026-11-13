@@ -16,7 +16,9 @@ y los pendientes.
   Finder o el explorador.
 - **⚙ Ajustes**: tema oscuro / claro / sistema, tipo y tamaño de letra, forma
   del árbol, tamaño de las figuras, etiquetas, rejilla, niebla, giro
-  automático y carpeta de Claude. Se recuerdan entre sesiones.
+  automático, color de fondo y carpeta de Claude. Se recuerdan entre sesiones.
+- **Clic derecho sobre un nodo**: «Ver solo esta rama» (proyecto, carpeta o
+  sesión); «↩ Ver todo» o Esc para volver.
 
 ## Instalar
 

@@ -39,6 +39,10 @@ pub struct App {
     carpeta_leida: std::path::PathBuf,
     busqueda: String,
     seleccion: Option<usize>,
+    /// Ver solo la rama de este nodo (más el camino hasta la raíz).
+    rama: Option<usize>,
+    /// Nodo sobre el que se abrió el menú contextual.
+    menu_nodo: Option<usize>,
     arrastrando_nodo: Option<usize>,
     /// Encuadra el grafo automáticamente hasta que la persona mueva la cámara.
     encuadre_auto: bool,
@@ -68,6 +72,8 @@ impl App {
             carpeta_leida: Default::default(),
             busqueda: String::new(),
             seleccion: None,
+            rama: None,
+            menu_nodo: None,
             arrastrando_nodo: None,
             encuadre_auto: true,
             arbol_calculado: None,
@@ -106,10 +112,16 @@ impl App {
                     self.vecinos = vecinos;
                     self.datos = d;
                     self.seleccion = None;
+                    self.rama = None;
+                    self.menu_nodo = None;
                     self.encuadre_auto = true;
                     self.arbol_calculado = None;
                     self.rx = None;
                     self.progreso.clear();
+                    // Para capturas de prueba: abrir viendo solo la rama con esa etiqueta.
+                    if let Ok(e) = std::env::var("GRAFO_RAMA") {
+                        self.rama = self.datos.nodos.iter().position(|n| n.etiqueta == e);
+                    }
                     return;
                 }
             }
@@ -141,7 +153,49 @@ impl App {
             }
             vis[i] = v;
         }
+        if let Some(r) = self.rama.filter(|&r| r < n) {
+            // La rama: el nodo y sus descendientes (los padres tienen id menor),
+            // más el camino hasta la raíz para que el árbol conserve su tronco.
+            let mut en_rama = vec![false; n];
+            en_rama[r] = true;
+            for i in r + 1..n {
+                en_rama[i] = self.padre[i].is_some_and(|p| en_rama[p]);
+            }
+            let mut a = self.padre[r];
+            while let Some(p) = a {
+                en_rama[p] = true;
+                a = self.padre[p];
+            }
+            for i in 0..n {
+                vis[i] &= en_rama[i];
+            }
+        }
         vis
+    }
+
+    /// Entra en la rama de `i` (o vuelve a todo con `None`) y reencuadra.
+    fn ver_rama(&mut self, i: Option<usize>) {
+        self.rama = i;
+        self.encuadre_auto = true;
+        if !self.ajustes.arbol {
+            self.camara.destino = V3::CERO;
+            if let Some(d) = &mut self.disp {
+                d.reactivar();
+            }
+        }
+    }
+
+    /// Paleta de la vista 3D: la del tema o, con fondo propio, la que contraste con él.
+    fn paleta_vista(&self, tema_oscuro: bool) -> (Paleta, bool) {
+        match self.ajustes.fondo {
+            Some([r, g, b]) => {
+                let oscuro = 0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * (b as f32) < 128.0;
+                let mut p = Paleta::de(oscuro);
+                p.fondo = Color32::from_rgb(r, g, b);
+                (p, oscuro)
+            }
+            None => (Paleta::de(tema_oscuro), tema_oscuro),
+        }
     }
 
     fn centrar_camara(&mut self) {
@@ -366,6 +420,24 @@ impl eframe::App for App {
                         }
                     }
                 });
+                if let Some(r) = self.rama.filter(|&r| r < self.datos.nodos.len()) {
+                    let mut volver = false;
+                    egui::Frame::new()
+                        .fill(ui.visuals().selection.bg_fill.gamma_multiply(0.35))
+                        .corner_radius(CornerRadius::same(5))
+                        .inner_margin(6.0)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("Rama: {}", datos::recortar(&self.datos.nodos[r].etiqueta, 28))).strong());
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    volver = ui.button("↩ Ver todo").on_hover_text("Esc").clicked();
+                                });
+                            });
+                        });
+                    if volver {
+                        self.ver_rama(None);
+                    }
+                }
                 if !self.progreso.is_empty() {
                     ui.horizontal(|ui| {
                         ui.spinner();
@@ -431,7 +503,8 @@ impl eframe::App for App {
                     .max_height(alto)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        for &id in self.datos.recientes.iter().take(80) {
+                        let en_rama = |id: usize| self.rama.is_none() || visibles[id];
+                        for &id in self.datos.recientes.iter().filter(|&&id| en_rama(id)).take(80) {
                             let n = &self.datos.nodos[id];
                             let proy = n
                                 .proyecto
@@ -455,7 +528,11 @@ impl eframe::App for App {
                     });
                 ui.separator();
                 ui.label(
-                    RichText::new(format!("Pendientes ({})", self.datos.pendientes.len())).strong(),
+                    RichText::new(format!(
+                        "Pendientes ({})",
+                        self.datos.pendientes.iter().filter(|&&id| self.rama.is_none() || visibles[id]).count()
+                    ))
+                    .strong(),
                 );
                 egui::ScrollArea::vertical()
                     .id_salt("pendientes")
@@ -466,7 +543,7 @@ impl eframe::App for App {
                                 RichText::new("Sin TODO/FIXME ni cambios sin commit.").weak(),
                             );
                         }
-                        for &id in &self.datos.pendientes {
+                        for &id in self.datos.pendientes.iter().filter(|&&id| self.rama.is_none() || visibles[id]) {
                             let n = &self.datos.nodos[id];
                             let proy = n
                                 .proyecto
@@ -560,7 +637,7 @@ impl eframe::App for App {
         self.ventana_ajustes(ui.ctx());
 
         // ------------------------------------------------------------ centro
-        let fondo = Paleta::de(ui.visuals().dark_mode).fondo;
+        let fondo = self.paleta_vista(ui.visuals().dark_mode).0.fondo;
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(fondo))
             .show(ui, |ui| {
@@ -580,8 +657,7 @@ impl App {
         let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
         let dt = ui.input(|i| i.stable_dt).min(0.1);
-        let oscuro = ui.visuals().dark_mode;
-        let pal = Paleta::de(oscuro);
+        let (pal, oscuro) = self.paleta_vista(ui.visuals().dark_mode);
         let fondo = pal.fondo;
         let color = |t: Tipo| color_tema(t, oscuro);
 
@@ -714,6 +790,13 @@ impl App {
         }
         if resp.clicked() {
             self.seleccion = hover;
+        }
+        if resp.secondary_clicked() {
+            self.menu_nodo = hover;
+        }
+        self.menu_contextual(&resp);
+        if self.rama.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) && !ui.ctx().egui_wants_keyboard_input() {
+            self.ver_rama(None);
         }
         if resp.double_clicked() {
             if let Some(h) = hover {
@@ -963,7 +1046,7 @@ impl App {
             rect.left_bottom() + Vec2::new(10.0, -10.0),
             Align2::LEFT_BOTTOM,
             format!(
-                "{visibles_n} nodos · arrastrar: girar / mover nodo · botón derecho: desplazar · rueda: zoom · doble clic: enfocar"
+                "{visibles_n} nodos · arrastrar: girar / mover nodo · clic derecho: menú (ver solo una rama) · arrastrar con derecho: desplazar · rueda: zoom · doble clic: enfocar"
             ),
             FontId::proportional(self.ajustes.tam_letra * 0.8),
             pal.ayuda,
@@ -975,10 +1058,73 @@ impl App {
     }
 }
 
+enum Accion {
+    Rama(usize),
+    Todo,
+    Seleccionar(usize),
+    Abrir(usize),
+    Centrar,
+}
+
+/// Fondos propuestos para la vista 3D.
+const FONDOS: [([u8; 3], &str); 6] = [
+    ([13, 15, 21], "Noche"),
+    ([0, 0, 0], "Negro"),
+    ([24, 32, 48], "Azul profundo"),
+    ([38, 40, 44], "Grafito"),
+    ([238, 234, 224], "Papel"),
+    ([255, 255, 255], "Blanco"),
+];
+
 /// Comando para instalar o actualizar desde GitHub.
 const COMANDO_INSTALAR: &str = "curl -fsSL https://raw.githubusercontent.com/airylp/grafoC/main/install.sh | sh";
 
 impl App {
+    /// Menú del clic derecho: sobre un nodo, ver solo su rama; siempre, volver a todo.
+    fn menu_contextual(&mut self, resp: &egui::Response) {
+        let mut accion = None;
+        let nodo = self.menu_nodo.filter(|&i| i < self.datos.nodos.len());
+        let en_rama = self.rama.is_some();
+        resp.context_menu(|ui| {
+            if let Some(i) = nodo {
+                let n = &self.datos.nodos[i];
+                ui.label(RichText::new(format!("{} · {}", n.tipo.nombre(), datos::recortar(&n.etiqueta, 40))).small().weak());
+                let tiene_hijos = self.padre.iter().any(|&p| p == Some(i));
+                if tiene_hijos && self.rama != Some(i) && ui.button("🔍 Ver solo esta rama").clicked() {
+                    accion = Some(Accion::Rama(i));
+                }
+                if ui.button("ℹ Ver detalle").clicked() {
+                    accion = Some(Accion::Seleccionar(i));
+                }
+                if n.ruta.is_some() && ui.button("📂 Abrir").clicked() {
+                    accion = Some(Accion::Abrir(i));
+                }
+                ui.separator();
+            }
+            if en_rama && ui.button("↩ Ver todo").clicked() {
+                accion = Some(Accion::Todo);
+            }
+            if ui.button("⌖ Centrar").clicked() {
+                accion = Some(Accion::Centrar);
+            }
+        });
+        match accion {
+            Some(Accion::Rama(i)) => {
+                self.seleccion = None;
+                self.ver_rama(Some(i));
+            }
+            Some(Accion::Todo) => self.ver_rama(None),
+            Some(Accion::Seleccionar(i)) => self.seleccion = Some(i),
+            Some(Accion::Abrir(i)) => {
+                if let Some(p) = &self.datos.nodos[i].ruta {
+                    abrir(p);
+                }
+            }
+            Some(Accion::Centrar) => self.centrar_camara(),
+            None => {}
+        }
+    }
+
     /// Aplica tema y letra cuando cambian (reconstruir las fuentes es caro).
     fn aplicar_ajustes(&mut self, ctx: &egui::Context) {
         if ctx.options(|o| o.theme_preference) != self.ajustes.tema {
@@ -1018,6 +1164,10 @@ impl App {
             .default_width(360.0)
             .default_pos(Pos2::new(340.0, 40.0))
             .show(ctx, |ui| {
+                let fondo_actual = {
+                    let c = self.paleta_vista(ui.visuals().dark_mode).0.fondo;
+                    [c.r(), c.g(), c.b()]
+                };
                 let a = &mut self.ajustes;
                 ui.label(RichText::new("Apariencia").strong());
                 egui::Grid::new("ajustes_apariencia").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -1041,6 +1191,27 @@ impl App {
                     ui.end_row();
                     ui.label("Tamaño de letra");
                     ui.add(egui::Slider::new(&mut a.tam_letra, 10.0..=16.0).step_by(0.5));
+                    ui.end_row();
+                    ui.label("Fondo de la vista");
+                    ui.horizontal(|ui| {
+                        if ui.selectable_label(a.fondo.is_none(), "Del tema").clicked() {
+                            a.fondo = None;
+                        }
+                        let mut c = a.fondo.unwrap_or(fondo_actual);
+                        if ui.color_edit_button_srgb(&mut c).on_hover_text("Elegir color").changed() {
+                            a.fondo = Some(c);
+                        }
+                        for (col, nombre) in FONDOS {
+                            let (r, resp) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
+                            let elegido = a.fondo == Some(col);
+                            ui.painter().rect_filled(r, CornerRadius::same(3), Color32::from_rgb(col[0], col[1], col[2]));
+                            let borde = if elegido { ui.visuals().selection.stroke } else { ui.visuals().widgets.inactive.bg_stroke };
+                            ui.painter().rect_stroke(r, CornerRadius::same(3), Stroke::new(borde.width.max(1.0), borde.color), egui::StrokeKind::Outside);
+                            if resp.on_hover_text(nombre).clicked() {
+                                a.fondo = Some(col);
+                            }
+                        }
+                    });
                     ui.end_row();
                 });
                 ui.separator();

@@ -23,6 +23,8 @@ pub struct Ajustes {
     pub tam_figuras: f32,
     /// Atenuar lo lejano.
     pub niebla: bool,
+    /// Color de fondo de la vista 3D; `None` = el del tema.
+    pub fondo: Option<[u8; 3]>,
     /// Tipos visibles al abrir (orden de `Tipo::TODOS`).
     pub mostrar: [bool; 6],
     /// Antigüedad máxima en días (0 = todo).
@@ -46,6 +48,7 @@ impl Default for Ajustes {
             rejilla: true,
             tam_figuras: 1.0,
             niebla: true,
+            fondo: None,
             mostrar: [true; 6],
             dias_max: 0,
             carpeta: String::new(),
@@ -97,6 +100,9 @@ impl Ajustes {
             self.dias_max,
             self.carpeta.replace('\n', " "),
         );
+        if let Some([r, g, b]) = self.fondo {
+            t += &format!("fondo=#{r:02x}{g:02x}{b:02x}\n");
+        }
         if let Some(i) = &self.idioma {
             t += &format!("idioma={i}\n");
         }
@@ -130,6 +136,7 @@ impl Ajustes {
                         a.mostrar[i] = c != '0';
                     }
                 }
+                "fondo" => a.fondo = color_hex(v),
                 "dias_max" => a.dias_max = v.parse::<u32>().unwrap_or(0).min(365),
                 "carpeta" => a.carpeta = v.into(),
                 "idioma" if !v.is_empty() => a.idioma = Some(v.into()),
@@ -171,6 +178,16 @@ impl Ajustes {
     }
 }
 
+/// `#rrggbb` → [r, g, b].
+fn color_hex(v: &str) -> Option<[u8; 3]> {
+    let h = v.strip_prefix('#')?;
+    if h.len() != 6 {
+        return None;
+    }
+    let c = |i: usize| u8::from_str_radix(h.get(i..i + 2)?, 16).ok();
+    Some([c(0)?, c(2)?, c(4)?])
+}
+
 #[cfg(test)]
 mod pruebas {
     use super::*;
@@ -188,6 +205,7 @@ mod pruebas {
             rejilla: false,
             tam_figuras: 1.5,
             niebla: false,
+            fondo: Some([10, 200, 255]),
             mostrar: [true, false, true, true, false, true],
             dias_max: 30,
             carpeta: "~/otra/.claude".into(),
