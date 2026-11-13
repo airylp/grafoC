@@ -17,6 +17,8 @@ y los pendientes.
 - **⚙ Ajustes**: tema oscuro / claro / sistema, tipo y tamaño de letra, forma
   del árbol, tamaño de las figuras, etiquetas, rejilla, niebla, giro
   automático, color de fondo y carpeta de Claude. Se recuerdan entre sesiones.
+- Las **sesiones en curso** y su camino hasta la raíz brillan con un halo que
+  respira, para ver de un vistazo qué proyectos están activos.
 - **Clic derecho sobre un nodo**: «Ver solo esta rama» (proyecto, carpeta o
   sesión); «↩ Ver todo» o Esc para volver.
 
@@ -31,12 +33,18 @@ Descarga el código, lo compila (instala Rust con rustup si hace falta) y:
 - **macOS**: crea `grafo.app` con ícono en `/Applications` (o `~/Applications`).
 - **Linux**: instala `~/.local/bin/grafo` con ícono y entrada en el menú.
 
-Si ya está instalado ofrece actualizar o desinstalar. Sin preguntas:
+Muestra un menú: si ya está instalado indica la versión instalada y la última
+publicada, y ofrece actualizar o desinstalar. Sin menú:
 
 ```sh
 … | sh -s -- instalar        # instalar o actualizar
+… | sh -s -- actualizar      # lo mismo
 … | sh -s -- desinstalar     # pregunta si borrar también la configuración
+… | sh -s -- comprobar       # solo muestra la versión instalada y la última
 ```
+
+Desde la app: ⚙ Ajustes → Actualizaciones busca si hay versión nueva, la
+instala y ofrece reiniciar.
 
 Variables opcionales: `GRAFO_REPO` (usuario/repo), `GRAFO_REF` (rama o tag),
 `GRAFO_DESTINO` (carpeta de instalación), `GRAFO_SOLO_BINARIO=1` (solo el

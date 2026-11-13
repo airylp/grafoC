@@ -1,4 +1,5 @@
 mod ajustes;
+mod actualizar;
 mod app;
 mod datos;
 mod espacio;
@@ -8,6 +9,10 @@ mod letras;
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version") {
+        println!("grafo {}", actualizar::version());
+        return Ok(());
+    }
     // `grafo --iconset carpeta`: PNG del ícono para empaquetar (macOS / Linux).
     if let Some(i) = args.iter().position(|a| a == "--iconset") {
         let dir = args.get(i + 1).map(String::as_str).unwrap_or("grafo.iconset");

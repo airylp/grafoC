@@ -12,6 +12,7 @@ use eframe::egui::{
     Vec2,
 };
 
+use crate::actualizar::{self, Actualizador, Estado};
 use crate::ajustes::Ajustes;
 use crate::datos::{self, Datos, Mensaje, Tipo, hace};
 use crate::letras;
@@ -34,6 +35,8 @@ pub struct App {
     letra_aplicada: (String, f32),
     letras_disponibles: Vec<&'static str>,
     ver_ajustes: bool,
+    actualizador: Actualizador,
+    error_reinicio: Option<String>,
     error_ajustes: Option<String>,
     /// Carpeta de Claude leída en la última carga.
     carpeta_leida: std::path::PathBuf,
@@ -68,6 +71,8 @@ impl App {
             letras_disponibles: letras::disponibles(),
             // Para capturas de prueba: abrir con la ventana de ajustes visible.
             ver_ajustes: std::env::var_os("GRAFO_VER_AJUSTES").is_some(),
+            actualizador: Actualizador::default(),
+            error_reinicio: None,
             error_ajustes: None,
             carpeta_leida: Default::default(),
             busqueda: String::new(),
@@ -848,6 +853,34 @@ impl App {
             }
         }
 
+        // --- Ramas activas: sesiones en curso, su camino hasta la raíz y sus archivos ---
+        let n_nodos = self.datos.nodos.len();
+        let mut activo = vec![false; n_nodos];
+        for i in 0..n_nodos {
+            if self.datos.nodos[i].activa {
+                activo[i] = true;
+                let mut a = self.padre[i];
+                while let Some(p) = a {
+                    if activo[p] {
+                        break;
+                    }
+                    activo[p] = true;
+                    a = self.padre[p];
+                }
+            }
+        }
+        for i in 0..n_nodos {
+            if let Some(p) = self.padre[i] {
+                if self.datos.nodos[p].activa {
+                    activo[i] = true;
+                }
+            }
+        }
+        let t = ui.input(|i| i.time) as f32;
+        // Brillo que «respira» despacio en lo activo.
+        let latido = 0.75 + 0.25 * (t * 2.2).sin();
+        let brillo_activo = mezclar(pal.activa, 0.55, Color32::from_rgb(255, 236, 160));
+
         // --- Aristas ---
         for &(a, b) in &self.datos.aristas {
             let (Some((_, za)), Some((_, zb))) = (pant[a], pant[b]) else { continue };
@@ -865,8 +898,9 @@ impl App {
                     Tipo::Proyecto => (2.0, mezclar(TRONCO, 0.6, color(Tipo::Sesion))),
                     _ => (1.0, color(self.datos.nodos[b].tipo)),
                 };
-                let base = if on { 0.95 } else if foco.is_some() { 0.12 } else { 0.55 };
-                let k = base * niebla((za + zb) * 0.5);
+                let viva = activo[a] && activo[b] && self.padre[b] == Some(a);
+                let base = if on || (viva && foco.is_none()) { 0.95 } else if foco.is_some() { 0.12 } else { 0.55 };
+                let k = base * niebla((za + zb) * 0.5).max(if viva { 0.8 } else { 0.0 });
                 // Rama curva: sale vertical del padre y llega vertical al hijo.
                 let (p0, p3) = (disp.pos[a], disp.pos[b]);
                 let dy = (p3.y - p0.y) * 0.55;
@@ -881,25 +915,36 @@ impl App {
                     .collect();
                 if let Some(puntos) = puntos {
                     let escala = (proy.focal / ((za + zb) * 0.5)).clamp(0.3, 2.5);
-                    painter.add(egui::Shape::line(
-                        puntos,
-                        Stroke::new((grosor * escala).max(0.8) + if on { 0.8 } else { 0.0 }, mezclar(base_col, k, fondo)),
-                    ));
+                    let ancho = (grosor * escala).max(0.8) + if on { 0.8 } else { 0.0 };
+                    if viva {
+                        // Halo suave debajo y la rama teñida del color de lo activo.
+                        let halo = mezclar(brillo_activo, 0.22 * latido * k, fondo);
+                        painter.add(egui::Shape::line(puntos.clone(), Stroke::new(ancho + 6.0, halo)));
+                        let col = mezclar(mezclar(brillo_activo, 0.65, base_col), k, fondo);
+                        painter.add(egui::Shape::line(puntos, Stroke::new(ancho + 1.2, col)));
+                    } else {
+                        painter.add(egui::Shape::line(puntos, Stroke::new(ancho, mezclar(base_col, k, fondo))));
+                    }
                 }
                 continue;
             }
             let Some((pa, pb)) = proy.segmento(disp.pos[a], disp.pos[b], cerca) else { continue };
             let (pa, pb) = (Pos2::new(pa.0, pa.1), Pos2::new(pb.0, pb.1));
             let on = foco.is_some() && resaltado(a) && resaltado(b);
-            let base = if on { 0.85 } else if foco.is_some() { 0.08 } else { 0.32 };
+            let viva = activo[a] && activo[b];
+            let base = if on || (viva && foco.is_none()) { 0.85 } else if foco.is_some() { 0.08 } else { 0.32 };
             let k = base * niebla((za + zb) * 0.5);
-            let c = mezclar(color(self.datos.nodos[b].tipo), k, fondo);
-            painter.line_segment([pa, pb], Stroke::new(if on { 1.6 } else { 1.0 }, c));
+            if viva {
+                painter.line_segment([pa, pb], Stroke::new(5.0, mezclar(brillo_activo, 0.2 * latido * k, fondo)));
+                painter.line_segment([pa, pb], Stroke::new(1.8, mezclar(brillo_activo, k, fondo)));
+            } else {
+                let c = mezclar(color(self.datos.nodos[b].tipo), k, fondo);
+                painter.line_segment([pa, pb], Stroke::new(if on { 1.6 } else { 1.0 }, c));
+            }
         }
 
         // --- Nodos (de atrás hacia adelante) ---
         dibs.sort_by(|a, b| b.z.total_cmp(&a.z));
-        let t = ui.input(|i| i.time) as f32;
         let ahora = Local::now();
         let mut hay_activas = false;
         // Las figuras miran hacia la cámara (un poco giradas para que se vea su grosor).
@@ -922,8 +967,23 @@ impl App {
                 let dias = (ahora - f).num_hours() as f32 / 24.0;
                 k *= (1.0 - dias / 60.0).clamp(0.55, 1.0);
             }
-            let c = color(n.tipo);
             let r = d.r;
+            // Lo activo resalta: sin niebla, más claro y con un halo que respira.
+            let vivo = activo[d.i] && foco.as_ref().is_none_or(|f| f.contains(&d.i));
+            let c = if vivo {
+                k = k.max(0.95);
+                escalar(color(n.tipo), 1.2)
+            } else {
+                color(n.tipo)
+            };
+            if vivo && matches!(n.tipo, Tipo::Raiz | Tipo::Carpeta | Tipo::Proyecto | Tipo::Sesion) {
+                hay_activas = true;
+                for (radio, alfa) in [(2.4, 0.07), (1.8, 0.11), (1.35, 0.16)] {
+                    // De cerca el halo no crece sin límite: como mucho ~30 px alrededor.
+                    let extra = (r * (radio - 1.0)).min(22.0 * (radio - 1.0));
+                    painter.circle_filled(d.p, r + extra, mezclar(brillo_activo, alfa * latido, fondo));
+                }
+            }
             if n.activa {
                 hay_activas = true;
                 let pulso = 1.0 + 0.35 * (t * 3.0).sin().abs();
@@ -992,12 +1052,13 @@ impl App {
             if mostrar {
                 let base = self.ajustes.tam_letra;
                 let tam = if etiqueta_fija { base * 0.95 } else { base * 0.82 };
+                let col = if vivo { mezclar(brillo_activo, 0.9, pal.etiqueta) } else { mezclar(pal.etiqueta, k.max(0.5), fondo) };
                 painter.text(
                     d.p + Vec2::new(r + 5.0, 0.0),
                     Align2::LEFT_CENTER,
                     datos::recortar(&n.etiqueta, 40),
-                    FontId::proportional(tam),
-                    mezclar(pal.etiqueta, k.max(0.5), fondo),
+                    FontId::proportional(if vivo && etiqueta_fija { tam * 1.08 } else { tam }),
+                    col,
                 );
             }
         }
@@ -1076,8 +1137,6 @@ const FONDOS: [([u8; 3], &str); 6] = [
     ([255, 255, 255], "Blanco"),
 ];
 
-/// Comando para instalar o actualizar desde GitHub.
-const COMANDO_INSTALAR: &str = "curl -fsSL https://raw.githubusercontent.com/airylp/grafoC/main/install.sh | sh";
 
 impl App {
     /// Menú del clic derecho: sobre un nodo, ver solo su rama; siempre, volver a todo.
@@ -1154,6 +1213,16 @@ impl App {
             return;
         }
         let mut abierta = true;
+        // Esc cierra la ventana (y no llega a la vista, que la usaría para salir de la rama).
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.ver_ajustes = false;
+            return;
+        }
+        // Al abrir los ajustes por primera vez se busca si hay versión nueva.
+        if self.actualizador.estado() == Estado::Inactivo {
+            self.actualizador.buscar(ctx);
+        }
+        let mut reiniciar = false;
         let mut recentrar = false;
         let mut releer = false;
         let mut restablecer = false;
@@ -1256,6 +1325,7 @@ impl App {
                     ui.colored_label(ui.visuals().warn_fg_color, "Esa carpeta no existe.");
                 }
                 ui.label(RichText::new("Vacía = CLAUDE_CONFIG_DIR o ~/.claude").small().weak());
+                ui.label(RichText::new("Esc cierra esta ventana").small().weak());
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("Restablecer valores").clicked() {
@@ -1265,23 +1335,90 @@ impl App {
                         ui.colored_label(ui.visuals().error_fg_color, format!("No se guardaron: {e}"));
                     }
                 });
-                ui.add_space(4.0);
-                let commit = option_env!("GRAFO_COMMIT").filter(|c| !c.is_empty());
-                ui.label(
-                    RichText::new(format!(
-                        "grafo {}{}",
-                        env!("CARGO_PKG_VERSION"),
-                        commit.map(|c| format!(" ({c})")).unwrap_or_default()
-                    ))
-                    .small()
-                    .weak(),
-                );
+                ui.separator();
+                ui.label(RichText::new("Actualizaciones").strong());
+                ui.label(format!("Versión: grafo {}", actualizar::version()));
+                let act = &self.actualizador;
+                match act.estado() {
+                    Estado::Inactivo => {
+                        if ui.button("🔍 Buscar actualizaciones").clicked() {
+                            act.buscar(ui.ctx());
+                        }
+                    }
+                    Estado::Buscando => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Buscando en GitHub…");
+                        });
+                    }
+                    Estado::AlDia => {
+                        ui.horizontal(|ui| {
+                            ui.colored_label(Paleta::de(ui.visuals().dark_mode).activa, "✔ Tienes la última versión");
+                            if ui.small_button("Buscar de nuevo").clicked() {
+                                act.buscar(ui.ctx());
+                            }
+                        });
+                    }
+                    Estado::Nueva(sha) => {
+                        let txt = if actualizar::commit().is_some() {
+                            format!("Hay una versión nueva ({sha}).")
+                        } else {
+                            format!("Última publicada: {sha} (esta copia no tiene número de versión).")
+                        };
+                        ui.label(RichText::new(txt).color(Paleta::de(ui.visuals().dark_mode).coincidencia));
+                        if ui.button("⬇ Instalar actualización").on_hover_text("Descarga, compila e instala (unos minutos); luego puedes reiniciar").clicked() {
+                            act.instalar(ui.ctx(), a.idioma.as_deref());
+                        }
+                    }
+                    Estado::Instalando => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Instalando… (compilar tarda unos minutos)");
+                        });
+                        ui.label(RichText::new(datos::recortar(&act.ultima_linea(), 60)).small().weak());
+                    }
+                    Estado::Instalada => {
+                        ui.horizontal(|ui| {
+                            ui.colored_label(Paleta::de(ui.visuals().dark_mode).activa, "✔ Actualización instalada");
+                            if ui.button("⟳ Reiniciar ahora").clicked() {
+                                reiniciar = true;
+                            }
+                        });
+                    }
+                    Estado::Error(e) => {
+                        ui.colored_label(ui.visuals().error_fg_color, datos::recortar(&e, 80));
+                        ui.horizontal(|ui| {
+                            if ui.small_button("Buscar de nuevo").clicked() {
+                                act.buscar(ui.ctx());
+                            }
+                            if ui.small_button("Instalar igualmente").clicked() {
+                                act.instalar(ui.ctx(), a.idioma.as_deref());
+                            }
+                        });
+                    }
+                }
+                let registro = act.registro();
+                if !registro.is_empty() {
+                    egui::CollapsingHeader::new(RichText::new("Registro del instalador").small()).id_salt("registro").show(ui, |ui| {
+                        egui::ScrollArea::vertical().max_height(140.0).stick_to_bottom(true).show(ui, |ui| {
+                            for l in &registro {
+                                ui.label(RichText::new(l).small().monospace());
+                            }
+                        });
+                    });
+                }
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Actualizar: vuelve a ejecutar el instalador").small().weak());
-                    if ui.small_button("Copiar comando").clicked() {
-                        ui.ctx().copy_text(COMANDO_INSTALAR.into());
+                    if ui.small_button("⟳ Reiniciar").on_hover_text("Cierra y vuelve a abrir grafo").clicked() {
+                        reiniciar = true;
+                    }
+                    if ui.small_button("Copiar comando del instalador").on_hover_text(actualizar::COMANDO_INSTALAR).clicked() {
+                        ui.ctx().copy_text(actualizar::COMANDO_INSTALAR.into());
                     }
                 });
+                if let Some(e) = &self.error_reinicio {
+                    ui.colored_label(ui.visuals().error_fg_color, format!("No se pudo reiniciar: {e}"));
+                }
+                ui.add_space(2.0);
                 if let Some(c) = crate::ajustes::carpeta_config() {
                     ui.label(RichText::new(format!("Ajustes en {}", datos::ruta_corta(&c))).small().weak());
                 }
@@ -1297,6 +1434,12 @@ impl App {
         }
         if releer && self.rx.is_none() {
             self.recargar();
+        }
+        if reiniciar {
+            // Antes de cerrar, que los ajustes queden guardados.
+            let _ = self.ajustes.guardar();
+            self.guardados = self.ajustes.clone();
+            self.error_reinicio = actualizar::reiniciar(ctx).err();
         }
         self.ver_ajustes = abierta;
     }

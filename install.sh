@@ -4,10 +4,13 @@
 #
 #     curl -fsSL https://raw.githubusercontent.com/airylp/grafoC/main/install.sh | sh
 #
-#   Pregunta qué hacer: si ya está instalado ofrece actualizar o desinstalar; si
-#   no, instalarlo. También se puede indicar directamente (sin preguntas):
+#   Muestra un menú: si ya está instalado indica la versión instalada y la última,
+#   y ofrece actualizar o desinstalar; si no, instalarlo. También se puede indicar
+#   directamente (sin menú):
 #     … | sh -s -- instalar        (instalar o actualizar)
+#     … | sh -s -- actualizar      (lo mismo)
 #     … | sh -s -- desinstalar     (pregunta si borrar también la configuración)
+#     … | sh -s -- comprobar       (solo muestra la versión instalada y la última)
 #
 #   macOS: crea grafo.app (con ícono) en /Applications (o ~/Applications sin permiso).
 #   Linux: instala ~/.local/bin/grafo con ícono y entrada en el menú de aplicaciones.
@@ -83,27 +86,69 @@ guardar_idioma() {
     echo "idioma=$IDIOMA" >> "$f"
 }
 
+# ------------------------------------------------------------ versiones
+# Versión instalada («0.1.0 (abc1234)» o vacía) y último commit publicado.
+version_instalada() {
+    if [ "$OS" = "Darwin" ]; then
+        for d in $APP_DIRS; do
+            if [ -d "$d/grafo.app" ]; then
+                defaults read "$d/grafo.app/Contents/Info" CFBundleVersion 2>/dev/null || echo "?"
+                return 0
+            fi
+        done
+    elif [ -x "$BIN_DIR/grafo" ]; then
+        # La guarda la instalación (ejecutar el programa abriría la ventana en versiones viejas).
+        cat "$DATA/grafo/version" 2>/dev/null || echo "?"
+        return 0
+    fi
+    return 1
+}
+ultimo_commit() {
+    curl -fsSL -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$REPO/commits/$REF" 2>/dev/null | cut -c1-7 || true
+}
+INSTALADA=""
+VERSION_ACTUAL="$(version_instalada || true)"
+[ -n "$VERSION_ACTUAL" ] && INSTALADA="$(if [ "$OS" = "Darwin" ]; then for d in $APP_DIRS; do [ -d "$d/grafo.app" ] && { echo "$d/grafo.app"; break; }; done; else echo "$BIN_DIR/grafo"; fi)"
+
+# ------------------------------------------------------------ comprobar
+if [ "$ACCION" = "comprobar" ] || [ "$ACCION" = "version" ]; then
+    ULTIMO="$(ultimo_commit)"
+    if [ -n "$INSTALADA" ]; then
+        echo "$(m 'Instalada' 'Installed' 'Installée'): $INSTALADA ($VERSION_ACTUAL)"
+    else
+        echo "$(m 'grafo no está instalado.' 'grafo is not installed.' 'grafo n’est pas installé.')"
+    fi
+    echo "$(m 'Última en GitHub' 'Latest on GitHub' 'Dernière sur GitHub'): ${ULTIMO:-?} ($REPO@$REF)"
+    case "$VERSION_ACTUAL" in
+        *"($ULTIMO)"*) [ -n "$ULTIMO" ] && echo "$(m 'Estás al día.' 'You are up to date.' 'Vous êtes à jour.')" ;;
+        *) [ -n "$INSTALADA" ] && [ -n "$ULTIMO" ] && echo "$(m 'Hay una versión nueva: … | sh -s -- actualizar' 'A new version is available: … | sh -s -- actualizar' 'Une nouvelle version est disponible : … | sh -s -- actualizar')" ;;
+    esac
+    exit 0
+fi
+
 # ------------------------------------------------------------ ¿qué hacer?
 # Sin acción indicada y con terminal, se pregunta. (La actualización desde la
 # app indica «instalar» y no pregunta nada.)
 if [ -z "$ACCION" ]; then
     ACCION=instalar
     if hay_terminal; then
-        instalada=""
-        if [ "$OS" = "Darwin" ]; then
-            for d in $APP_DIRS; do
-                [ -d "$d/grafo.app" ] && { instalada="$d/grafo.app"; break; }
-            done
-            [ -n "$instalada" ] && version=$(defaults read "$instalada/Contents/Info" CFBundleVersion 2>/dev/null || echo "?")
-        elif [ -x "$BIN_DIR/grafo" ]; then
-            instalada="$BIN_DIR/grafo"
-            version="?"
-        fi
-        if [ -n "$instalada" ]; then
+        ULTIMO="$(ultimo_commit)"
+        if [ -n "$INSTALADA" ]; then
+            case "$VERSION_ACTUAL" in
+                *"($ULTIMO)"*) al_dia=1 ;;
+                *) al_dia=0 ;;
+            esac
+            [ -n "$ULTIMO" ] || al_dia=0
             {
-                echo "$(m "grafo ya está instalado: $instalada (versión $version)" "grafo is already installed: $instalada (version $version)" "grafo est déjà installé : $instalada (version $version)")"
-                echo "  1) $(m 'Actualizar a la última versión' 'Update to the latest version' 'Mettre à jour vers la dernière version')"
-                echo "  2) $(m 'Desinstalar' 'Uninstall' 'Désinstaller')"
+                echo "$(m "grafo ya está instalado: $INSTALADA" "grafo is already installed: $INSTALADA" "grafo est déjà installé : $INSTALADA")"
+                echo "   $(m 'Versión instalada' 'Installed version' 'Version installée'): $VERSION_ACTUAL"
+                echo "   $(m 'Última en GitHub' 'Latest on GitHub' 'Dernière sur GitHub'):  ${ULTIMO:-?}"
+                if [ "$al_dia" = 1 ]; then
+                    echo "  1) $(m 'Reinstalar (ya tienes la última versión)' 'Reinstall (you already have the latest version)' 'Réinstaller (vous avez déjà la dernière version)')"
+                else
+                    echo "  1) $(m 'Actualizar a la última versión' 'Update to the latest version' 'Mettre à jour vers la dernière version')"
+                fi
+                echo "  2) $(m 'Desinstalar (pregunta si borrar también los ajustes)' 'Uninstall (asks whether to delete the settings too)' 'Désinstaller (demande s’il faut supprimer les réglages)')"
                 echo "  3) $(m 'Cancelar' 'Cancel' 'Annuler')"
             } > /dev/tty
             leer "$(m 'Elige [1-3] (Enter = 1): ' 'Choose [1-3] (Enter = 1): ' 'Choisissez [1-3] (Entrée = 1) : ')"
@@ -115,8 +160,16 @@ if [ -z "$ACCION" ]; then
         else
             destino="/Applications"
             [ "$OS" = "Darwin" ] || destino="$BIN_DIR"
-            leer "$(m "Se va a instalar grafo en ${GRAFO_DESTINO:-$destino}. ¿Continuar? [S/n] " "grafo will be installed in ${GRAFO_DESTINO:-$destino}. Continue? [Y/n] " "grafo va être installé dans ${GRAFO_DESTINO:-$destino}. Continuer ? [O/n] ")"
-            case "$r" in n|N|no|No|non|Non) m "Cancelado." "Cancelled." "Annulé."; echo; exit 0 ;; esac
+            {
+                echo "$(m "grafo no está instalado. Última versión: ${ULTIMO:-?}" "grafo is not installed. Latest version: ${ULTIMO:-?}" "grafo n’est pas installé. Dernière version : ${ULTIMO:-?}")"
+                echo "  1) $(m "Instalar en ${GRAFO_DESTINO:-$destino}" "Install in ${GRAFO_DESTINO:-$destino}" "Installer dans ${GRAFO_DESTINO:-$destino}")"
+                echo "  2) $(m 'Cancelar' 'Cancel' 'Annuler')"
+            } > /dev/tty
+            leer "$(m 'Elige [1-2] (Enter = 1): ' 'Choose [1-2] (Enter = 1): ' 'Choisissez [1-2] (Entrée = 1) : ')"
+            case "${r:-1}" in
+                1) ACCION=instalar ;;
+                *) m "Cancelado." "Cancelled." "Annulé."; echo; exit 0 ;;
+            esac
         fi
     fi
 fi
@@ -132,6 +185,7 @@ if [ "$ACCION" = "desinstalar" ] || [ "$ACCION" = "--desinstalar" ]; then
             fi
         done
     else
+        rm -rf "$DATA/grafo"
         for f in "$BIN_DIR/grafo" "$DATA/applications/grafo.desktop" "$DATA/icons/hicolor/256x256/apps/grafo.png"; do
             if [ -e "$f" ]; then rm -f "$f" && info "$(m "Quitado $f" "Removed $f" "Supprimé : $f")"; fi
         done
@@ -150,7 +204,7 @@ if [ "$ACCION" = "desinstalar" ] || [ "$ACCION" = "--desinstalar" ]; then
     info "$(m 'grafo desinstalado' 'grafo uninstalled' 'grafo désinstallé')"
     exit 0
 fi
-[ "$ACCION" = "instalar" ] || [ "$ACCION" = "actualizar" ] || fail "$(m "acción desconocida: $ACCION (usa instalar o desinstalar)" "unknown action: $ACCION (use instalar or desinstalar)" "action inconnue : $ACCION (utilisez instalar ou desinstalar)")"
+[ "$ACCION" = "instalar" ] || [ "$ACCION" = "actualizar" ] || fail "$(m "acción desconocida: $ACCION (usa instalar, actualizar, desinstalar o comprobar)" "unknown action: $ACCION (use instalar, actualizar, desinstalar or comprobar)" "action inconnue : $ACCION (utilisez instalar, actualizar, desinstalar ou comprobar)")"
 
 # ------------------------------------------------------------ requisitos
 command -v curl >/dev/null 2>&1 || fail "$(m 'se necesita curl' 'curl is required' 'curl est nécessaire')"
@@ -221,6 +275,8 @@ Categories=Utility;Development;
 StartupWMClass=grafo
 DESKTOP
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$DATA/applications" 2>/dev/null || true
+    mkdir -p "$DATA/grafo"
+    "$BIN_DIR/grafo" --version | sed 's/^grafo //' > "$DATA/grafo/version" || true
     guardar_idioma
     info "$(m "Instalado: $BIN_DIR/grafo (y en el menú de aplicaciones)" "Installed: $BIN_DIR/grafo (and in the applications menu)" "Installé : $BIN_DIR/grafo (et dans le menu des applications)")"
     case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "   $(m "Nota: $BIN_DIR no está en tu PATH; añádelo para escribir «grafo» en la terminal." "Note: $BIN_DIR is not in your PATH; add it to run “grafo” from the terminal." "Remarque : $BIN_DIR n’est pas dans votre PATH ; ajoutez-le pour lancer « grafo » depuis le terminal.")" ;; esac
